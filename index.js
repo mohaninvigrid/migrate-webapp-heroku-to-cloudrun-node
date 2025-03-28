@@ -1,8 +1,8 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const mustacheExpress = require('mustache-express');
-const { parse } = require('pg-connection-string');
 const { Client } = require('pg');
+const { parse } = require('pg-connection-string');
 
 const app = express();
 app.use(bodyParser.json());
@@ -13,67 +13,64 @@ app.set('views', __dirname + '/views');
 
 let client = null;
 let dbReady = false;
-
 const PORT = process.env.PORT || 8080;
 
 const run = async () => {
   try {
-    if (process.env.DATABASE_URL) {
-      const config = parse(process.env.DATABASE_URL);
-      if (config.host.includes('amazonaws.com')) {
+    const dbUrl = process.env.DATABASE_URL;
+    if (dbUrl) {
+      const config = parse(dbUrl);
+
+      if (config.host.includes("amazonaws.com")) {
         config.ssl = { rejectUnauthorized: false };
       }
 
       client = new Client(config);
       await client.connect();
       dbReady = true;
-      console.log('Database connected successfully');
+      console.log('✅ Connected to the database.');
     } else {
-      console.warn('DATABASE_URL not set. Running without database.');
+      console.warn('⚠️ DATABASE_URL is not set. Running without database.');
     }
 
     app.listen(PORT, () => {
-      console.log(Server started on port ${PORT});
+      console.log('🚀 Server started on PORT ${PORT}');
     });
   } catch (err) {
-    console.error('Startup failed:', err);
+    console.error('❌ Startup failed:', err);
     process.exit(1);
   }
 };
 
-// Health check
+// Health check route
 app.get('/healthz', (req, res) => res.status(200).send('OK'));
 
-// Home
+// Root route
 app.get('/', async (req, res) => {
-  if (!dbReady) {
-    return res.status(503).send('Database not configured.');
-  }
-
+  if (!dbReady) return res.status(503).send('Database not connected.');
   try {
     const result = await client.query('SELECT DESCRIPTION FROM TASKS');
-    res.render('main', { tasks: result.rows });
-    console.log(Displaying ${result.rows.length} tasks.);
+    const alltasks = { tasks: result.rows };
+    res.render('main', alltasks);
+    console.log('📋 Displaying ${alltasks.tasks.length} tasks.');
   } catch (e) {
-    console.error(e);
-    res.status(500).send('Error fetching tasks');
+    console.error('❌ Error in GET /:', e);
+    res.status(500).send('Internal server error');
   }
 });
 
-// Add task
+// Add task route
 app.post('/task', async (req, res) => {
-  if (!dbReady) {
-    return res.status(503).send('Database not configured.');
-  }
+  if (!dbReady) return res.status(503).send('Database not connected.');
 
   const taskDescription = req.body.task;
   try {
     await client.query('INSERT INTO tasks (DESCRIPTION) VALUES ($1)', [taskDescription]);
-    console.log(Added task "${taskDescription}");
+    console.log('➕ Added task "${taskDescription}"');
     res.redirect('/');
   } catch (e) {
-    console.error(e);
-    res.status(500).send('Failed to add task');
+    console.error('❌ Error adding task:', e);
+    res.sendStatus(500);
   }
 });
 
