@@ -1,22 +1,15 @@
-name: Build & Deploy to Cloud Run
+name: Build & Deploy to Cloud Run (Development)
 
 on:
   push:
     branches:
       - gcp-devtest
 
-env:
-  PROJECT_ID: provarity-devtest
-  REGION: us-central1
-  REPO: prov-ar-dev-212-artifactregistry-1
-  ARTIFACT_DOMAIN: us-central1-docker.pkg.dev
-  CLOUD_RUN: run4-dev-220-cloudrun-1
-  APP_IMAGE: app
-  WORKER_IMAGE: workers
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment: development
+
     permissions:
       id-token: write
       contents: read
@@ -25,70 +18,60 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud with WIF
+      - name: Authenticate to Google Cloud using WIF
         uses: google-github-actions/auth@v1
         with:
-          workload_identity_provider: projects/471809734182/locations/global/workloadIdentityPools/github-identity-pool/providers/github-actions-provider
-          service_account: github-action-dev@provarity-devtest.iam.gserviceaccount.com
-    
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker $ARTIFACT_DOMAIN
-        
+        run: gcloud auth configure-docker ${{ secrets.ARTIFACT_DOMAIN }}
+
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
-        
-      - name: Print active service account
-        run: |
-          echo "Authenticated account:"
-          gcloud auth list
 
       - name: Print authenticated service account
         run: |
           echo "Authenticated account:"
           gcloud auth list
-          echo ""
-          echo "Service account email from access token"
           ACCESS_TOKEN=$(gcloud auth print-access-token)
           curl -s https://oauth2.googleapis.com/tokeninfo?access_token=$ACCESS_TOKEN | jq .
-                
-      - name: Build and Push container images from docker-compose (overwrite latest)
+
+      - name: Build and Push container images (App + Worker)
         run: |
-          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$APP_IMAGE . --build-arg CMD="npm start"
-          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$WORKER_IMAGE . --build-arg CMD="node all-workers.js"
-          
-          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$APP_IMAGE
-          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$WORKER_IMAGE
-          
-      - name: Check cloud run existence
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.APP_IMAGE }} . --build-arg CMD="npm start"
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.WORKER_IMAGE }} . --build-arg CMD="node all-workers.js"
+
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.APP_IMAGE }}
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.WORKER_IMAGE }}
+
+      - name: Check if Cloud Run service exists
         id: check-run
         run: |
-          if gcloud run services describe $CLOUD_RUN --region=$REGION --platform=managed; then
+          if gcloud run services describe ${{ secrets.CLOUD_RUN }} --region=${{ secrets.REGION }} --platform=managed; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Deploy APP to cloud run
+      - name: Deploy App to Cloud Run
         if: steps.check-run.outputs.exists == 'true'
         run: |
-          gcloud run deploy $APP_IMAGE \
-            --image=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$APP_IMAGE \
-            --region=$REGION \
+          gcloud run deploy ${{ secrets.APP_IMAGE }} \
+            --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.APP_IMAGE }} \
+            --region=${{ secrets.REGION }} \
             --platform=managed \
-            --set-env-vars="NODE_ENV=production" \
+            --set-env-vars="NODE_ENV=development" \
             --allow-unauthenticated \
             --quiet
 
-      - name: Deploy Workers to cloud run
+      - name: Deploy Worker to Cloud Run
         if: steps.check-run.outputs.exists == 'true'
         run: |
-          gcloud run deploy $WORKER_IMAGE \
-            --image=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$WORKER_IMAGE \
-            --region=$REGION \
+          gcloud run deploy ${{ secrets.WORKER_IMAGE }} \
+            --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.WORKER_IMAGE }} \
+            --region=${{ secrets.REGION }} \
             --platform=managed \
-            --set-env-vars="NODE_ENV=production" \
+            --set-env-vars="NODE_ENV=development" \
             --allow-unauthenticated \
             --quiet
-
-   
-
