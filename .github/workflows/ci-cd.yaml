@@ -36,7 +36,7 @@ jobs:
         run: |
           docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }} . --build-arg CMD="node all-workers.js"
           docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}
-
+      
       - name: Check if Cloud Run service exists
         id: check-run
         run: |
@@ -45,16 +45,3 @@ jobs:
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
-          
-
-      - name: Deploy IgnitedAPI_Workers to Cloud Run
-        if: steps.check-run.outputs.exists == 'true'
-        run: |
-          SERVICE=${{ secrets.IGNITEDAPI_WORKERS }}
-          gcloud run deploy ${{ secrets.IGNITEDAPI_WORKERS }} \
-            --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$SERVICE \
-            --region=${{ secrets.REGION }} \
-            --platform=managed \
-            --set-env-vars="NODE_ENV=development" \
-            --allow-unauthenticated \
-            --quiet
