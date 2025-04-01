@@ -60,7 +60,7 @@ jobs:
       - name: Deploy IgnitedAPI_Workers to Cloud Run
         if: steps.check-run.outputs.exists == 'true'
         run: |
-          gcloud run deploy ${{ secrets.WORKER_IMAGE }} \
+          gcloud run deploy ${{ secrets.IGNITEDAPI_WORKERS }} \
             --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }} \
             --region=${{ secrets.REGION }} \
             --platform=managed \
