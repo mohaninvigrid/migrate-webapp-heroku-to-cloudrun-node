@@ -46,17 +46,6 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
           
-      - name: Deploy IgnitedAPI to Cloud Run
-        if: steps.check-run.outputs.exists == 'true'
-        run: |
-          SERVICE=${{ secrets.IGNITEDAPI }}
-          gcloud run deploy $SERVICE \
-            --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$SERVICE \
-            --region=${{ secrets.REGION }} \
-            --platform=managed \
-            --set-env-vars="NODE_ENV=development" \
-            --allow-unauthenticated \
-            --quiet
 
       - name: Deploy IgnitedAPI_Workers to Cloud Run
         if: steps.check-run.outputs.exists == 'true'
