@@ -24,26 +24,18 @@ jobs:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
 
-      - name: Configure Docker for Artifact Registry
+      - name: Configure Docker
         run: gcloud auth configure-docker ${{ secrets.ARTIFACT_DOMAIN }}
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Print authenticated service account
+      - name: Build and Push App (IgnitedAPI)
         run: |
-          echo "Authenticated account:"
-          gcloud auth list
-          ACCESS_TOKEN=$(gcloud auth print-access-token)
-          curl -s https://oauth2.googleapis.com/tokeninfo?access_token=$ACCESS_TOKEN | jq .
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}//${{ secrets.IGNITEDAPI }} . --build-arg CMD="npm start"
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }}
 
-      - name: Build and Push container images (App + Worker)
+      - name: Build and Push Workers (IgnitedAPI_Workers)
         run: |
-          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.APP_IMAGE }} . --build-arg CMD="npm start"
-          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.WORKER_IMAGE }} . --build-arg CMD="node all-workers.js"
-
-          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.APP_IMAGE }}
-          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.WORKER_IMAGE }}
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDPI_WORKERS }} . --build-arg CMD="node all-workers.js"
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDPI_WORKERS }}
 
       - name: Check if Cloud Run service exists
         id: check-run
@@ -54,22 +46,22 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Deploy App to Cloud Run
+      - name: Deploy IgnitedAPI to Cloud Run
         if: steps.check-run.outputs.exists == 'true'
         run: |
-          gcloud run deploy ${{ secrets.APP_IMAGE }} \
-            --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.APP_IMAGE }} \
+          gcloud run deploy ${{ secrets.IGNITEDAPI }} \
+            --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }} \
             --region=${{ secrets.REGION }} \
             --platform=managed \
             --set-env-vars="NODE_ENV=development" \
             --allow-unauthenticated \
             --quiet
 
-      - name: Deploy Worker to Cloud Run
+      - name: Deploy IgnitedAPI_Workers to Cloud Run
         if: steps.check-run.outputs.exists == 'true'
         run: |
           gcloud run deploy ${{ secrets.WORKER_IMAGE }} \
-            --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.WORKER_IMAGE }} \
+            --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }} \
             --region=${{ secrets.REGION }} \
             --platform=managed \
             --set-env-vars="NODE_ENV=development" \
