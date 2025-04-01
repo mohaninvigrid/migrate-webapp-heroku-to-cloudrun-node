@@ -45,7 +45,7 @@ jobs:
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
-
+          
       - name: Deploy IgnitedAPI to Cloud Run
         if: steps.check-run.outputs.exists == 'true'
         run: |
