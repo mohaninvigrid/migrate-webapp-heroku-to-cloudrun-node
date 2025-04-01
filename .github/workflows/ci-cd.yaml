@@ -42,6 +42,11 @@ jobs:
           docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }} . --build-arg CMD="node workers/scheduled/poc-warning.js"
           docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}
           
+      - name: Build and Push Chat Staging (Ignited_Chat_Staging)
+        run: |
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }} . --build-arg CMD="npm start"
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }}
+          
       - name: Check if Cloud Run service exists
         id: check-run
         run: |
