@@ -36,7 +36,12 @@ jobs:
         run: |
           docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }} . --build-arg CMD="node all-workers.js"
           docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}
-      
+
+      - name: Build and Push Scheduler (IgnitedAPI_Scheduler)
+        run: |
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }} . --build-arg CMD="node workers/scheduled/poc-warning.js"
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}
+          
       - name: Check if Cloud Run service exists
         id: check-run
         run: |
