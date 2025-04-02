@@ -40,8 +40,13 @@ jobs:
         run: |
           docker push us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }}
           docker push us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}
-          docker push us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}
-          
+
+      
+      - name: Build and Push Scheduler (IgnitedAPI_Scheduler)
+        run: |
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }} . --build-arg CMD="node workers/scheduled/poc-warning.js"
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}
+
       - name: Build and Push Chat Staging (Ignited_Chat_Staging)
         run: |
           docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }} . --build-arg CMD="npm start"
