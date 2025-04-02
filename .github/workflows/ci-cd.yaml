@@ -34,17 +34,13 @@ jobs:
 
       - name: Build images using docker-compose
         run: |
-          docker-compose build web workers
+          docker-compose build web workers ignitedapi_scheduler
 
       - name: Push web and workers images to Artifact Registry
         run: |
           docker push us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }}
           docker push us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}
-
-      - name: Build and Push Scheduler (IgnitedAPI_Scheduler)
-        run: |
-          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }} . --build-arg CMD="node workers/scheduled/poc-warning.js"
-          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}
+          docker push us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}
           
       - name: Build and Push Chat Staging (Ignited_Chat_Staging)
         run: |
