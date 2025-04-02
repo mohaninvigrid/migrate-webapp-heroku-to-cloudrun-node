@@ -15,7 +15,7 @@ services:
     image: us-central1-docker.pkg.dev/provarity-devtest/prov-ar-dev-212-artifactregistry-1/ignitedapi_workers_dev
     command: ["node", "all-workers.js"]
 
-  ignitedapi_workers:
+  ignitedapi_scheduler:
     build:
       context: .
       args:
