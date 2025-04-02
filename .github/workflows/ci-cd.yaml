@@ -27,6 +27,11 @@ jobs:
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ secrets.ARTIFACT_DOMAIN }}
 
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+
       - name: Build images using docker-compose
         run: |
           docker-compose build web workers
