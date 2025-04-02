@@ -27,15 +27,14 @@ jobs:
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ secrets.ARTIFACT_DOMAIN }}
 
-      - name: Build and Push App (IgnitedAPI)
+      - name: Build images using docker-compose
         run: |
-          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }} . --build-arg CMD="npm start"
-          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }}
+          docker-compose build web workers
 
-      - name: Build and Push Workers (IgnitedAPI_Workers)
+      - name: Push web and workers images to Artifact Registry
         run: |
-          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }} . --build-arg CMD="node all-workers.js"
-          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}
+          docker push us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }}
+          docker push us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}
 
       - name: Build and Push Scheduler (IgnitedAPI_Scheduler)
         run: |
