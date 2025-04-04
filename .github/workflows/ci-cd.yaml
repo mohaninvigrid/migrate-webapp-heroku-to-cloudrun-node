@@ -34,7 +34,7 @@ jobs:
     
       - name: Build images using docker-compose
         run: |
-          docker-compose build web workers ignitedapi_scheduler || echo "Skipping build if services not found"
+          docker-compose build || echo "Skipping build if services not found"
     
       - name: Tag images as 'latest'
         run: |
