@@ -1,12 +1,12 @@
-name: Build & Deploy to Cloud Run (Development)
+name: Build & Push to Artifact Registry (Development)
 
 on:
   push:
     branches:
       - gcp-devtest
-      
+
 jobs:
-  build-and-deploy:
+  build-and-push:
     runs-on: ubuntu-latest
     environment: development
 
@@ -14,91 +14,71 @@ jobs:
       id-token: write
       contents: read
 
-    steps: 
+    steps:
       - name: Checkout code
         uses: actions/checkout@v4
-    
+
       - name: Authenticate to Google Cloud using WIF
         uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
-    
+
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ secrets.ARTIFACT_DOMAIN }}
-    
+
       - name: Install Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install -y docker-compose
-    
+
       - name: Build images using docker-compose
         run: |
           docker-compose build || echo "Skipping build if services not found"
-          
-      - name: Build and Push Chat Staging (Ignited_Chat_Staging)
+
+      - name: Build and Push Ignited Scheduler
         run: |
-          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }} . --build-arg CMD="npm start"
-    
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }} . \
+            --build-arg CMD="node workers/scheduled/poc-warning.js"
+
+      - name: Build and Push Chat Staging
+        run: |
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }} . \
+            --build-arg CMD="npm start"
+
       - name: Tag images as 'latest'
         run: |
-          docker tag ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }} ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }}:latest
-          docker tag ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}:latest
-          docker tag ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}:latest
-          
+          for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            docker tag ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image \
+              ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image:latest || echo "Tag failed for $image"
+          done
+
       - name: Push all tagged images to Artifact Registry
         continue-on-error: true
         run: |
-          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }}:latest || echo "Push failed"
-          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}:latest || echo "Push failed"
-          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}:latest || echo "Push failed"
-          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }}:latest || echo "Push failed"
-    
-      - name: Retag previous images as 'previous'
+          for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image:latest || echo "Push failed for $image"
+          done
+
+      - name: Retag previous image digest as 'previous'
         continue-on-error: true
         run: |
           for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            DIGEST=$(gcloud artifacts docker images list ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image --include-tags --format="get(digest)" --limit=2 | tail -n 1)
+            DIGEST=$(gcloud artifacts docker images list ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image \
+              --include-tags --format="get(digest)" --limit=2 | tail -n 1)
             if [ -n "$DIGEST" ]; then
-              gcloud artifacts docker tags add ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image@${DIGEST} ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image:previous
+              gcloud artifacts docker tags add ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image@$DIGEST \
+                ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image:previous
             fi
           done
-    
-      - name: Deploy to Cloud Run (All Services)
-        run: |
-          for service in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            gcloud run deploy $service \
-              --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$service:latest \
-              --region=${{ secrets.REGION }} \
-              --platform=managed \
-              --set-env-vars="NODE_ENV=development" \
-              --revision-suffix=latest \
-              --allow-unauthenticated \
-              --quiet || echo "Deployment failed for $service"
-          done
-    
-      - name: Clean up old revisions in Cloud Run (keep latest 3)
+
+      - name: Cleanup old image digests (keep latest 3)
         continue-on-error: true
         run: |
-          for service in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            gcloud run revisions list --service=$service --region=${{ secrets.REGION }} --platform=managed --sort-by="~createTime" --format="value(METADATA.name)" | tail -n +4 | while read oldrev; do
-              gcloud run revisions delete $oldrev --region=${{ secrets.REGION }} --platform=managed --quiet || true
-            done
-          done
-    
-      - name: Rollback Option (if needed)
-        if: ${{ failure() }}
-        run: |
-          echo "Rolling back to previous revision for all services..."
-          for service in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            REVISION=$(gcloud run revisions list --service=$service --region=${{ secrets.REGION }} --sort-by="~createTime" --limit=2 --format="value(METADATA.name)" | tail -n1)
-            if [ -n "$REVISION" ]; then
-              gcloud run services update-traffic $service \
-                --region=${{ secrets.REGION }} \
-                --to-revisions=$REVISION=100 \
-                --platform=managed
-              echo "Rolled back $service to $REVISION"
-            else
-              echo "No previous revision found for $service"
-            fi
+          for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            gcloud artifacts docker images list ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image \
+              --include-tags --sort-by="~createTime" \
+              --format="value(version)" | tail -n +4 | while read digest; do
+                gcloud artifacts docker images delete ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image@$digest --quiet || true
+              done
           done
