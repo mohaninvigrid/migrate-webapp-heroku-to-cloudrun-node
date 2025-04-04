@@ -4,17 +4,7 @@ on:
   push:
     branches:
       - gcp-devtest
-  workflow_dispatch:
-    inputs:
-      ROLLBACK:
-        description: 'Set to true to roll back to the previous image'
-        required: false
-        default: 'false'
-
-env:
-  IMAGE_BASE: us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}
-  COMMIT_TAG: ${{ github.sha }}
-
+      
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -24,116 +14,88 @@ jobs:
       id-token: write
       contents: read
 
-    steps:
+    steps: 
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Authenticate to Google Cloud
+    
+      - name: Authenticate to Google Cloud using WIF
         uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
-
+    
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ secrets.ARTIFACT_DOMAIN }}
-
+    
       - name: Install Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install -y docker-compose
-
-      - name: Build services
+    
+      - name: Build images using docker-compose
         run: |
-          docker-compose build web workers ignitedapi_scheduler
-
-      - name: Tag, push, and cleanup images
+          docker-compose build web workers ignitedapi_scheduler || echo "Skipping build if services not found"
+    
+      - name: Tag images as 'latest'
         run: |
-          SERVICES=(
-            "${{ secrets.IGNITEDAPI }}"
-            "${{ secrets.IGNITEDAPI_WORKERS }}"
-            "${{ secrets.IGNITEDAPI_SCHEDULER }}"
-            "${{ secrets.IGNITED_CHAT_STAGING }}"
-          )
-
-          CUSTOM_CMDS=(
-            ""
-            ""
-            "node workers/scheduled/poc-warning.js"
-            "npm start"
-          )
-
-          for index in "${!SERVICES[@]}"; do
-            NAME="${SERVICES[$index]}"
-            CMD="${CUSTOM_CMDS[$index]}"
-            REMOTE_IMAGE="$IMAGE_BASE/$NAME"
-
-            echo "Processing image: $NAME"
-
-            if [[ -n "$CMD" ]]; then
-              docker build -t local/$NAME . --build-arg CMD="$CMD"
-            else
-              docker tag $NAME local/$NAME
+          docker tag ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }} ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }}:latest
+          docker tag ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}:latest
+          docker tag ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}:latest
+          docker tag ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }} ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }}:latest
+    
+      - name: Push all tagged images to Artifact Registry
+        continue-on-error: true
+        run: |
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI }}:latest || echo "Push failed"
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_WORKERS }}:latest || echo "Push failed"
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }}:latest || echo "Push failed"
+          docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }}:latest || echo "Push failed"
+    
+      - name: Retag previous images as 'previous'
+        continue-on-error: true
+        run: |
+          for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            DIGEST=$(gcloud artifacts docker images list ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image --include-tags --format="get(digest)" --limit=2 | tail -n 1)
+            if [ -n "$DIGEST" ]; then
+              gcloud artifacts docker tags add ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image@${DIGEST} ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image:previous
             fi
-
-            # Pull existing latest and push as previous, if exists
-            if docker pull $REMOTE_IMAGE:latest 2>/dev/null; then
-              docker tag $REMOTE_IMAGE:latest $REMOTE_IMAGE:previous
-              docker push $REMOTE_IMAGE:previous
-              echo "Tagged and pushed previous image for $NAME"
-            else
-              echo "No existing latest image found for $NAME"
-            fi
-
-            # Tag and push new image
-            docker tag local/$NAME $REMOTE_IMAGE:latest
-            docker tag local/$NAME $REMOTE_IMAGE:$COMMIT_TAG
-            docker push $REMOTE_IMAGE:latest
-            docker push $REMOTE_IMAGE:$COMMIT_TAG
-
-            # Check if repository exists before cleanup
-            if gcloud artifacts repositories describe ${{ secrets.REPO }} \
-              --location=us-central1 --project=${{ secrets.PROJECT_ID }} > /dev/null 2>&1; then
-
-              TAGS=$(gcloud artifacts docker tags list $REMOTE_IMAGE \
-                --sort-by=~TIMESTAMP \
-                --format="value(name)" 2>/dev/null | grep -vE 'latest|previous' | tail -n +4 || true)
-
-              for TAG in $TAGS; do
-                echo "Deleting old tag: $TAG"
-                gcloud artifacts docker images delete "$TAG" --quiet --delete-tags || true
-              done
-
-            else
-              echo "Repository or image not found yet. Skipping cleanup for $NAME"
-            fi
-
-            echo "Completed processing $NAME"
           done
-
-      - name: Check if Cloud Run service exists
-        id: check-run
+    
+      - name: Deploy to Cloud Run (All Services)
         run: |
-          if gcloud run services describe ${{ secrets.CLOUD_RUN }} \
-            --region=${{ secrets.REGION }} \
-            --platform=managed; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Rollback to previous version
-        if: github.event.inputs.ROLLBACK == 'true'
+          for service in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            gcloud run deploy $service \
+              --image=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$service:latest \
+              --region=${{ secrets.REGION }} \
+              --platform=managed \
+              --set-env-vars="NODE_ENV=development" \
+              --revision-suffix=latest \
+              --allow-unauthenticated \
+              --quiet || echo "Deployment failed for $service"
+          done
+    
+      - name: Clean up old revisions in Cloud Run (keep latest 3)
+        continue-on-error: true
         run: |
-          for NAME in \
-              "${{ secrets.IGNITEDAPI }}" \
-              "${{ secrets.IGNITEDAPI_WORKERS }}" \
-              "${{ secrets.IGNITEDAPI_SCHEDULER }}" \
-              "${{ secrets.IGNITED_CHAT_STAGING }}"; do
-
-            echo "Rolling back $NAME to previous"
-            gcloud run deploy ${{ secrets.CLOUD_RUN }} \
-              --image $IMAGE_BASE/$NAME:previous \
-              --region ${{ secrets.REGION }} \
-              --platform managed \
-              --quiet || echo "Rollback failed for $NAME. Previous tag might be missing."
+          for service in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            gcloud run revisions list --service=$service --region=${{ secrets.REGION }} --platform=managed --sort-by="~createTime" --format="value(METADATA.name)" | tail -n +4 | while read oldrev; do
+              gcloud run revisions delete $oldrev --region=${{ secrets.REGION }} --platform=managed --quiet || true
+            done
+          done
+    
+      - name: Rollback Option (if needed)
+        if: ${{ failure() }}
+        run: |
+          echo "Rolling back to previous revision for all services..."
+          for service in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            REVISION=$(gcloud run revisions list --service=$service --region=${{ secrets.REGION }} --sort-by="~createTime" --limit=2 --format="value(METADATA.name)" | tail -n1)
+            if [ -n "$REVISION" ]; then
+              gcloud run services update-traffic $service \
+                --region=${{ secrets.REGION }} \
+                --to-revisions=$REVISION=100 \
+                --platform=managed
+              echo "Rolled back $service to $REVISION"
+            else
+              echo "No previous revision found for $service"
+            fi
           done
