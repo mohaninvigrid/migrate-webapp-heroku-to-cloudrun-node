@@ -64,11 +64,13 @@ jobs:
         continue-on-error: true
         run: |
           for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            DIGEST=$(gcloud artifacts docker images list ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image \
+            DIGEST=$(gcloud artifacts docker images list ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image \
               --include-tags --format="get(digest)" --limit=2 | tail -n 1)
+      
             if [ -n "$DIGEST" ]; then
-              gcloud artifacts docker tags add ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image@$DIGEST \
-                ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image:previous
+              gcloud artifacts docker tags add \
+                ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image@$DIGEST \
+                ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image:previous
             fi
           done
 
