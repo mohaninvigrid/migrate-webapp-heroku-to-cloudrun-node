@@ -36,9 +36,9 @@ jobs:
         run: |
           docker-compose build || echo "Skipping build if services not found"
           
-      - name: Build (IgnitedAPI_Scheduler)
+      - name: Build and Push Chat Staging (Ignited_Chat_Staging)
         run: |
-          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }} . --build-arg CMD="node workers/scheduled/poc-warning.js"
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITED_CHAT_STAGING }} . --build-arg CMD="npm start"
     
       - name: Tag images as 'latest'
         run: |
