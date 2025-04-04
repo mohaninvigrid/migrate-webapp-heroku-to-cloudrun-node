@@ -59,46 +59,4 @@ jobs:
           for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
             docker push ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image:latest || echo "Push failed for $image"
           done
-
-      - name: Retag previous image digest as 'previous'
-        continue-on-error: true
-        run: |
-          for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-      
-            # Only pass repo (not image) to get digests
-            DIGEST=$(gcloud artifacts docker images list ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }} \
-              --include-tags --filter="package=$image" --sort-by="~createTime" --format="value(version)" --limit=2 | tail -n 1)
-      
-            if [ -n "$DIGEST" ]; then
-              # Tag the second-latest digest as 'previous'
-              gcloud artifacts docker tags add \
-                ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image@$DIGEST \
-                ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image:previous
-            else
-              echo "No previous digest found for $image"
-            fi
-      
-          done
-
-      - name: Cleanup old image digests (keep latest 3)
-        continue-on-error: true
-        run: |
-          for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-      
-            echo "Cleaning up digests for image: $image"
-      
-            gcloud artifacts docker images list ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }} \
-              --filter="package=$image" \
-              --include-tags \
-              --sort-by="~createTime" \
-              --format="value(version)" \
-              | tail -n +4 | while read digest; do
-      
-                echo "Deleting old digest: $digest"
-                gcloud artifacts docker images delete \
-                  ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$image@$digest \
-                  --quiet || true
-      
-              done
-      
-          done
+       
