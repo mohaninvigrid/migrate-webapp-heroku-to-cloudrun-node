@@ -5,14 +5,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: us-central1-docker.pkg.dev/provarity-devtest/prov-ar-dev-212-artifactregistry-1/ignitedapi_dev
+    image: us-central1-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IGNITEDAPI}
     command: ["npm", "start"]
 
   workers:
     build:
       context: .
       dockerfile: Dockerfile
-    image: us-central1-docker.pkg.dev/provarity-devtest/prov-ar-dev-212-artifactregistry-1/ignitedapi_workers_dev
+    image: us-central1-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IGNITEDAPI_WORKERS}
     command: ["node", "all-workers.js"]
 
   ignitedapi_scheduler:
