@@ -35,6 +35,10 @@ jobs:
       - name: Build images using docker-compose
         run: |
           docker-compose build || echo "Skipping build if services not found"
+          
+      - name: Build (IgnitedAPI_Scheduler)
+        run: |
+          docker build -t ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/${{ secrets.IGNITEDAPI_SCHEDULER }} . --build-arg CMD="node workers/scheduled/poc-warning.js"
     
       - name: Tag images as 'latest'
         run: |
