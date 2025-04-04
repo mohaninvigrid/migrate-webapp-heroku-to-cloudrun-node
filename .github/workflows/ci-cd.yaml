@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       ROLLBACK:
-        description: 'Set to true to roll back to previous image'
+        description: 'Set to true to roll back to the previous image'
         required: false
         default: 'false'
 
@@ -28,7 +28,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud using WIF
+      - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
@@ -42,81 +42,98 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Build images using docker-compose
+      - name: Build services
         run: |
           docker-compose build web workers ignitedapi_scheduler
 
-      - name: Tag current images as previous
+      - name: Tag, push, and cleanup images
         run: |
-          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            docker pull $IMAGE_BASE/$IMAGE:latest || continue
-            docker tag $IMAGE_BASE/$IMAGE:latest $IMAGE_BASE/$IMAGE:previous
-            docker push $IMAGE_BASE/$IMAGE:previous
-          done
-
-      - name: Cleanup old images (web, workers, scheduler, chat)
-        run: |
-          set -e
-          IMAGE_NAMES=(
+          SERVICES=(
             "${{ secrets.IGNITEDAPI }}"
             "${{ secrets.IGNITEDAPI_WORKERS }}"
             "${{ secrets.IGNITEDAPI_SCHEDULER }}"
             "${{ secrets.IGNITED_CHAT_STAGING }}"
           )
 
-          for IMAGE in "${IMAGE_NAMES[@]}"; do
-            echo "Deleting old images for $IMAGE..."
-            IMAGE_PATH=$IMAGE_BASE/$IMAGE
-            TAGS=$(gcloud artifacts docker tags list $IMAGE_PATH --format="value(name)")
-            for TAG in $TAGS; do
-              gcloud artifacts docker images delete "$TAG" --quiet --delete-tags
-            done
+          CUSTOM_CMDS=(
+            ""
+            ""
+            "node workers/scheduled/poc-warning.js"
+            "npm start"
+          )
+
+          for index in "${!SERVICES[@]}"; do
+            NAME="${SERVICES[$index]}"
+            CMD="${CUSTOM_CMDS[$index]}"
+            REMOTE_IMAGE="$IMAGE_BASE/$NAME"
+
+            echo "Processing image: $NAME"
+
+            if [[ -n "$CMD" ]]; then
+              docker build -t local/$NAME . --build-arg CMD="$CMD"
+            else
+              docker tag $NAME local/$NAME
+            fi
+
+            # Pull existing latest and push as previous, if exists
+            if docker pull $REMOTE_IMAGE:latest 2>/dev/null; then
+              docker tag $REMOTE_IMAGE:latest $REMOTE_IMAGE:previous
+              docker push $REMOTE_IMAGE:previous
+              echo "Tagged and pushed previous image for $NAME"
+            else
+              echo "No existing latest image found for $NAME"
+            fi
+
+            # Tag and push new image
+            docker tag local/$NAME $REMOTE_IMAGE:latest
+            docker tag local/$NAME $REMOTE_IMAGE:$COMMIT_TAG
+            docker push $REMOTE_IMAGE:latest
+            docker push $REMOTE_IMAGE:$COMMIT_TAG
+
+            # Check if repository exists before cleanup
+            if gcloud artifacts repositories describe ${{ secrets.REPO }} \
+              --location=us-central1 --project=${{ secrets.PROJECT_ID }} > /dev/null 2>&1; then
+
+              TAGS=$(gcloud artifacts docker tags list $REMOTE_IMAGE \
+                --sort-by=~TIMESTAMP \
+                --format="value(name)" 2>/dev/null | grep -vE 'latest|previous' | tail -n +4 || true)
+
+              for TAG in $TAGS; do
+                echo "Deleting old tag: $TAG"
+                gcloud artifacts docker images delete "$TAG" --quiet --delete-tags || true
+              done
+
+            else
+              echo "Repository or image not found yet. Skipping cleanup for $NAME"
+            fi
+
+            echo "Completed processing $NAME"
           done
-
-      - name: Push web and workers images to Artifact Registry
-        run: |
-          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }}; do
-            docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-            docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:latest
-            docker push $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-            docker push $IMAGE_BASE/$IMAGE:latest
-          done
-
-      - name: Build and Push Scheduler (IgnitedAPI_Scheduler)
-        run: |
-          IMAGE=${{ secrets.IGNITEDAPI_SCHEDULER }}
-          docker build -t $IMAGE_BASE/$IMAGE . --build-arg CMD="node workers/scheduled/poc-warning.js"
-          docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-          docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:latest
-          docker push $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-          docker push $IMAGE_BASE/$IMAGE:latest
-
-      - name: Build and Push Chat Staging (Ignited_Chat_Staging)
-        run: |
-          IMAGE=${{ secrets.IGNITED_CHAT_STAGING }}
-          docker build -t $IMAGE_BASE/$IMAGE . --build-arg CMD="npm start"
-          docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-          docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:latest
-          docker push $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-          docker push $IMAGE_BASE/$IMAGE:latest
 
       - name: Check if Cloud Run service exists
         id: check-run
         run: |
-          if gcloud run services describe ${{ secrets.CLOUD_RUN }} --region=${{ secrets.REGION }} --platform=managed; then
+          if gcloud run services describe ${{ secrets.CLOUD_RUN }} \
+            --region=${{ secrets.REGION }} \
+            --platform=managed; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Rollback to previous if requested
+      - name: Rollback to previous version
         if: github.event.inputs.ROLLBACK == 'true'
         run: |
-          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }}; do
-            echo "Rolling back $IMAGE to 'previous' tag"
+          for NAME in \
+              "${{ secrets.IGNITEDAPI }}" \
+              "${{ secrets.IGNITEDAPI_WORKERS }}" \
+              "${{ secrets.IGNITEDAPI_SCHEDULER }}" \
+              "${{ secrets.IGNITED_CHAT_STAGING }}"; do
+
+            echo "Rolling back $NAME to previous"
             gcloud run deploy ${{ secrets.CLOUD_RUN }} \
-              --image $IMAGE_BASE/$IMAGE:previous \
+              --image $IMAGE_BASE/$NAME:previous \
               --region ${{ secrets.REGION }} \
               --platform managed \
-              --quiet
+              --quiet || echo "Rollback failed for $NAME. Previous tag might be missing."
           done
