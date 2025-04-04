@@ -12,7 +12,7 @@ on:
         default: 'false'
 
 env:
-  IMAGE_BASE: ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}
+  IMAGE_BASE: us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}
   COMMIT_TAG: ${{ github.sha }}
 
 jobs:
@@ -46,17 +46,21 @@ jobs:
         run: |
           docker-compose build web workers ignitedapi_scheduler
 
-      - name: Tag current images as previous
+      - name: Tag current images as previous (only if latest exists)
         run: |
           for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            docker pull $IMAGE_BASE/$IMAGE:latest || continue
-            docker tag $IMAGE_BASE/$IMAGE:latest $IMAGE_BASE/$IMAGE:previous
-            docker push $IMAGE_BASE/$IMAGE:previous
+            echo "🔍 Checking for latest tag on $IMAGE..."
+            if docker pull $IMAGE_BASE/$IMAGE:latest 2>/dev/null; then
+              docker tag $IMAGE_BASE/$IMAGE:latest $IMAGE_BASE/$IMAGE:previous
+              docker push $IMAGE_BASE/$IMAGE:previous
+              echo "✅ Tagged $IMAGE:previous"
+            else
+              echo "⚠️  No latest tag found for $IMAGE. Skipping 'previous' tagging."
+            fi
           done
 
-      - name: Cleanup old images (web, workers, scheduler, chat)
+      - name: Cleanup old tags (keep latest 3 versions if available)
         run: |
-          set -e
           IMAGE_NAMES=(
             "${{ secrets.IGNITEDAPI }}"
             "${{ secrets.IGNITEDAPI_WORKERS }}"
@@ -65,11 +69,21 @@ jobs:
           )
 
           for IMAGE in "${IMAGE_NAMES[@]}"; do
-            echo "Deleting old images for $IMAGE..."
+            echo "🧹 Cleaning up old tags for $IMAGE"
             IMAGE_PATH=$IMAGE_BASE/$IMAGE
-            TAGS=$(gcloud artifacts docker tags list $IMAGE_PATH --format="value(name)")
+
+            TAGS=$(gcloud artifacts docker tags list $IMAGE_PATH \
+              --sort-by=~TIMESTAMP \
+              --format="value(name)" 2>/dev/null | grep -vE 'latest|previous' | tail -n +4 || true)
+
+            if [ -z "$TAGS" ]; then
+              echo "ℹ️  No old tags found for $IMAGE to clean."
+              continue
+            fi
+
             for TAG in $TAGS; do
-              gcloud artifacts docker images delete "$TAG" --quiet --delete-tags
+              echo "🗑 Deleting old tag: $TAG"
+              gcloud artifacts docker images delete "$TAG" --quiet --delete-tags || true
             done
           done
 
@@ -112,11 +126,11 @@ jobs:
       - name: Rollback to previous if requested
         if: github.event.inputs.ROLLBACK == 'true'
         run: |
-          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }}; do
-            echo "Rolling back $IMAGE to 'previous' tag"
+          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            echo "🔁 Rolling back $IMAGE to 'previous' tag"
             gcloud run deploy ${{ secrets.CLOUD_RUN }} \
               --image $IMAGE_BASE/$IMAGE:previous \
               --region ${{ secrets.REGION }} \
               --platform managed \
-              --quiet
+              --quiet || echo "⚠️  Rollback failed for $IMAGE. Make sure 'previous' tag exists."
           done
