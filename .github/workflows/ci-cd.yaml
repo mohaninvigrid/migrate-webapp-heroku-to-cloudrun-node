@@ -78,46 +78,31 @@ jobs:
         run: |
           echo "IMAGE_BASE=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
       
-      - name: Cleanup old images (keep latest, previous, and 1 recent)
+      - name: Cleanup old image tags in Artifact Registry
         run: |
-          IMAGE_NAMES=(
-            "${{ secrets.IGNITEDAPI }}"
-            "${{ secrets.IGNITEDAPI_WORKERS }}"
-            "${{ secrets.IGNITEDAPI_SCHEDULER }}"
-            "${{ secrets.IGNITED_CHAT_STAGING }}"
-          )
-      
-          for IMAGE in "${IMAGE_NAMES[@]}"; do
-            echo "Cleaning up old images for $IMAGE..."
-            FULL_PATH="${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$IMAGE"
-      
-            # Get all digests sorted by createTime descending
-            DIGESTS=$(gcloud artifacts docker images list $FULL_PATH \
-              --include-tags --sort-by="~createTime" --format="value(digest)")
-      
+          IMAGES=("${{ secrets.IGNITEDAPI }}" "${{ secrets.IGNITEDAPI_WORKERS }}" "${{ secrets.IGNITEDAPI_SCHEDULER }}" "${{ secrets.IGNITED_CHAT_STAGING }}")
+          for IMAGE in "${IMAGES[@]}"; do
+            echo "Cleaning up old tags for $IMAGE..."
+            TAGS=$(gcloud artifacts docker tags list $IMAGE_BASE/$IMAGE --format="value(tag)" --sort-by="~createTime")
+            KEEP_TAGS=("latest" "previous")
             COUNT=0
-            for digest in $DIGESTS; do
-              # Skip empty digest
-              if [ -z "$digest" ]; then
+
+            # Save third most recent (after latest & previous)
+            for TAG in $TAGS; do
+              if [[ " ${KEEP_TAGS[@]} " =~ " $TAG " ]]; then
                 continue
               fi
-      
-              # Always keep the first 3 digests (most recent)
-              COUNT=$((COUNT+1))
-              if [ "$COUNT" -le 3 ]; then
-                echo "Keeping recent digest $digest for $IMAGE"
-                continue
+              if [[ $COUNT -lt 1 ]]; then
+                KEEP_TAGS+=("$TAG")
+                ((COUNT++))
               fi
-      
-              # Check if tagged as latest or previous
-              TAGS=$(gcloud artifacts docker tags list "$FULL_PATH@$digest" --format="value(tag)" || echo "")
-              if echo "$TAGS" | grep -qE "latest|previous"; then
-                echo "Skipping digest $digest (tagged as latest or previous)"
-                continue
+            done
+
+            # Delete tags not in KEEP_TAGS
+            for TAG in $TAGS; do
+              if [[ ! " ${KEEP_TAGS[@]} " =~ " $TAG " ]]; then
+                echo "Deleting tag $TAG for $IMAGE"
+                gcloud artifacts docker tags delete $IMAGE_BASE/$IMAGE:$TAG --quiet
               fi
-      
-              # Delete the digest
-              echo "Deleting digest $digest for $IMAGE..."
-              gcloud artifacts docker images delete "$FULL_PATH@$digest" --quiet || true
             done
           done
