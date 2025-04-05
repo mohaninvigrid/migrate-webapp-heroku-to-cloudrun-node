@@ -78,46 +78,46 @@ jobs:
         run: |
           echo "IMAGE_BASE=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
       
-      - name: Cleanup old images from Artifact Registry
+      - name: Cleanup old images (keep latest, previous, and 1 recent)
         run: |
-          set -e
-          echo "Starting deep cleanup for images..."
-      
-          IMAGE_NAMES=("IGNITEDAPI" "IGNITEDAPI_WORKERS" "IGNITEDAPI_SCHEDULER" "IGNITED_CHAT_STAGING")
+          IMAGE_NAMES=(
+            "${{ secrets.IGNITEDAPI }}"
+            "${{ secrets.IGNITEDAPI_WORKERS }}"
+            "${{ secrets.IGNITEDAPI_SCHEDULER }}"
+            "${{ secrets.IGNITED_CHAT_STAGING }}"
+          )
       
           for IMAGE in "${IMAGE_NAMES[@]}"; do
-            echo ""
-            echo "Cleaning image: $IMAGE"
-            FULL_PATH="${IMAGE_BASE}/${IMAGE}"
+            echo "Cleaning up old images for $IMAGE..."
+            FULL_PATH="${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$IMAGE"
       
-            echo "Listing digests for: $FULL_PATH"
-            ALL_DIGESTS=$(gcloud artifacts docker images list $FULL_PATH \
-              --include-tags \
-              --sort-by="~createTime" \
-              --format="value(version)")
+            # Get all digests sorted by createTime descending
+            DIGESTS=$(gcloud artifacts docker images list $FULL_PATH \
+              --include-tags --sort-by="~createTime" --format="value(digest)")
       
-            echo "All digests:"
-            echo "$ALL_DIGESTS"
-      
-            # Pick 3 most recent digests to keep
-            DIGESTS_TO_KEEP=$(echo "$ALL_DIGESTS" | head -n 3)
-      
-            echo "Keeping digests:"
-            echo "$DIGESTS_TO_KEEP"
-      
-            for DIGEST in $ALL_DIGESTS; do
-              if echo "$DIGESTS_TO_KEEP" | grep -q "$DIGEST"; then
-                echo "Skipping $DIGEST (one of the latest 3)"
+            COUNT=0
+            for digest in $DIGESTS; do
+              # Skip empty digest
+              if [ -z "$digest" ]; then
                 continue
               fi
       
-              TAGS=$(gcloud artifacts docker tags list "${FULL_PATH}@${DIGEST}" --format="value(tag)" || echo "")
-              if echo "$TAGS" | grep -Eq "latest|previous"; then
-                echo "Skipping $DIGEST (protected tag)"
+              # Always keep the first 3 digests (most recent)
+              COUNT=$((COUNT+1))
+              if [ "$COUNT" -le 3 ]; then
+                echo "Keeping recent digest $digest for $IMAGE"
                 continue
               fi
       
-              echo "Deleting digest $DIGEST..."
-              gcloud artifacts docker images delete "${FULL_PATH}@${DIGEST}" --quiet || true
+              # Check if tagged as latest or previous
+              TAGS=$(gcloud artifacts docker tags list "$FULL_PATH@$digest" --format="value(tag)" || echo "")
+              if echo "$TAGS" | grep -qE "latest|previous"; then
+                echo "Skipping digest $digest (tagged as latest or previous)"
+                continue
+              fi
+      
+              # Delete the digest
+              echo "Deleting digest $digest for $IMAGE..."
+              gcloud artifacts docker images delete "$FULL_PATH@$digest" --quiet || true
             done
           done
