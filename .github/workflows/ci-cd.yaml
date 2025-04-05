@@ -81,14 +81,13 @@ jobs:
             docker push $IMAGE_BASE/$IMAGE:latest
           done
 
-      - name: Cleanup old digests (keep latest 3, skip latest & previous)
+      - name: Cleanup old digests (keep latest 3, skip :latest & :previous)
         continue-on-error: true
         run: |
-          IMAGE_BASE="us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
-          
+          IMAGE_BASE="${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
+      
           for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
             echo "Cleaning up $IMAGE..."
-            
             FULL_IMAGE_PATH="${IMAGE_BASE}/${IMAGE}"
       
             # Get digests sorted by createTime, skip top 3
@@ -108,7 +107,7 @@ jobs:
               fi
       
               # Delete the digest
-              echo "Deleting $digest for $IMAGE"
+              echo "Deleting $digest for $IMAGE..."
               gcloud artifacts docker images delete $FULL_IMAGE_PATH@$digest --quiet || true
             done
           done
