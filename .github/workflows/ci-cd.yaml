@@ -1,4 +1,4 @@
-name: Build & Deploy to Cloud Run (Development)
+name: Build & Push to Artifact Registry (Development)
 
 on:
   push:
@@ -42,19 +42,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Build web and workers using docker-compose
+      - name: Build and tag web (IgnitedAPI) and workers (IgnitedAPI_Workers)
         run: |
-          docker-compose build web workers
+          docker build -t $IMAGE_BASE/${{ secrets.IGNITEDAPI }} . --build-arg CMD="npm start"
+          docker build -t $IMAGE_BASE/${{ secrets.IGNITEDAPI_WORKERS }} . --build-arg CMD="node all-workers.js"
 
-      - name: Build Scheduler
+      - name: Build and tag Scheduler
         run: |
           IMAGE=${{ secrets.IGNITEDAPI_SCHEDULER }}
           docker build -t $IMAGE_BASE/$IMAGE . --build-arg CMD="node workers/scheduled/poc-warning.js"
 
-      - name: Build Chat Staging
+      - name: Build and tag Chat Staging
         run: |
           IMAGE=${{ secrets.IGNITED_CHAT_STAGING }}
           docker build -t $IMAGE_BASE/$IMAGE . --build-arg CMD="npm start"
+
+      - name: Confirm all built images
+        run: docker images
 
       - name: Tag current images as previous
         run: |
