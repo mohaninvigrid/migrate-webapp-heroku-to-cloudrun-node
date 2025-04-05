@@ -86,10 +86,13 @@ jobs:
             TAGS=$(gcloud artifacts docker tags list $IMAGE_BASE/$IMAGE --format="value(tag)" --sort-by="~createTime")
             KEEP_TAGS=("latest" "previous")
             COUNT=0
-
+            
+            # Debug the TAGS output
+            echo "All tags for $IMAGE: $TAGS"
+            
             # Save third most recent (after latest & previous)
             for TAG in $TAGS; do
-              if [[ " ${KEEP_TAGS[@]} " =~ " $TAG " ]]; then
+              if [[ " ${KEEP_TAGS[*]} " == *" $TAG "* ]]; then
                 continue
               fi
               if [[ $COUNT -lt 1 ]]; then
@@ -97,10 +100,13 @@ jobs:
                 ((COUNT++))
               fi
             done
-
+            
+            # Debug the KEEP_TAGS array
+            echo "Tags to keep for $IMAGE: ${KEEP_TAGS[*]}"
+            
             # Delete tags not in KEEP_TAGS
             for TAG in $TAGS; do
-              if [[ ! " ${KEEP_TAGS[@]} " =~ " $TAG " ]]; then
+              if [[ ! " ${KEEP_TAGS[*]} " == *" $TAG "* ]]; then
                 echo "Deleting tag $TAG for $IMAGE"
                 gcloud artifacts docker tags delete $IMAGE_BASE/$IMAGE:$TAG --quiet
               fi
