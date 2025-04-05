@@ -36,50 +36,61 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Build images using docker-compose
+      - name: Build Docker images using docker-compose
         run: |
           docker-compose build web workers
 
-      - name: Build scheduler and chat manually
+      - name: Build Scheduler Image (IgnitedAPI_Scheduler)
         run: |
           docker build -t $IMAGE_BASE/${{ secrets.IGNITEDAPI_SCHEDULER }} . \
             --build-arg CMD="node workers/scheduled/poc-warning.js"
+
+      - name: Build Chat Staging Image (Ignited_Chat_Staging)
+        run: |
           docker build -t $IMAGE_BASE/${{ secrets.IGNITED_CHAT_STAGING }} . \
             --build-arg CMD="npm start"
 
-      - name: Pull latest & tag as previous
+      - name: Pull existing latest and tag as previous
         continue-on-error: true
         run: |
           for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            echo "Tagging previous for $image..."
             docker pull $IMAGE_BASE/$image:latest && \
             docker tag $IMAGE_BASE/$image:latest $IMAGE_BASE/$image:previous && \
-            docker push $IMAGE_BASE/$image:previous || echo "No latest image to retag for $image"
+            docker push $IMAGE_BASE/$image:previous || echo "No latest image exists for $image to tag as previous"
           done
 
-      - name: Clean old digests (keep only :latest and :previous)
-        continue-on-error: true
-        run: |
-          for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            echo "Cleaning old digests for $image..."
-            digests=$(gcloud artifacts docker images list $IMAGE_BASE/$image \
-              --include-tags --sort-by="~createTime" --format="value(digest)")
-            
-            keep=$(gcloud artifacts docker tags list $IMAGE_BASE/$image \
-              --format="value(version)" --filter="tag=latest OR tag=previous")
-
-            for digest in $digests; do
-              if echo "$keep" | grep -q "$digest"; then
-                echo "Keeping digest $digest"
-              else
-                echo "Deleting digest $digest"
-                gcloud artifacts docker images delete $IMAGE_BASE/$image@$digest --quiet --delete-tags || true
-              fi
-            done
-          done
-
-      - name: Tag new images as latest and push
+      - name: Tag and Push latest images
         run: |
           for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
             docker tag $IMAGE_BASE/$image $IMAGE_BASE/$image:latest
+            docker tag $IMAGE_BASE/$image $IMAGE_BASE/$image:$COMMIT_TAG
             docker push $IMAGE_BASE/$image:latest
+            docker push $IMAGE_BASE/$image:$COMMIT_TAG
+          done
+
+      - name: Cleanup old images in Artifact Registry (keep latest 3)
+        continue-on-error: true
+        run: |
+          for image in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            echo "Cleaning up old images for $image..."
+
+            FULL_IMAGE_PATH="${{ env.IMAGE_BASE }}/$image"
+
+            gcloud artifacts docker images list $FULL_IMAGE_PATH \
+              --include-tags \
+              --sort-by="~createTime" \
+              --format="value(digest)" | tail -n +4 | while read digest; do
+
+              TAGS=$(gcloud artifacts docker tags list $FULL_IMAGE_PATH@$digest \
+                --format="value(tag)" || echo "")
+
+              if echo "$TAGS" | grep -qE "latest|previous"; then
+                echo "Skipping digest $digest (has protected tag)"
+                continue
+              fi
+
+              echo "Deleting digest $digest for $image"
+              gcloud artifacts docker images delete $FULL_IMAGE_PATH@$digest --quiet || true
+            done
           done
