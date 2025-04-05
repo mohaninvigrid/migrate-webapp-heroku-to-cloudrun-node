@@ -81,34 +81,34 @@ jobs:
             docker push $IMAGE_BASE/$IMAGE:latest
           done
 
-      - name: Cleanup old digests (keep latest 3, skip :latest & :previous)
+      - name: Cleanup old image digests (keep latest 3, skip :latest/:previous)
         continue-on-error: true
         run: |
           IMAGE_BASE="${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
-      
+          
           for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            echo "Cleaning up $IMAGE..."
+            echo "Cleaning up image: $IMAGE"
             FULL_IMAGE_PATH="${IMAGE_BASE}/${IMAGE}"
       
-            # Get digests sorted by createTime, skip top 3
             gcloud artifacts docker images list $FULL_IMAGE_PATH \
               --include-tags \
               --sort-by="~createTime" \
               --format="value(digest)" | tail -n +4 | while read digest; do
-      
-              # Get all tags for this digest
-              TAGS=$(gcloud artifacts docker tags list $FULL_IMAGE_PATH@$digest \
-                --format="value(tag)" || echo "")
-      
-              # Skip if digest has a protected tag
-              if echo "$TAGS" | grep -qE "latest|previous"; then
-                echo "Skipping digest $digest (has protected tag)"
+              
+              if [ -z "$digest" ]; then
+                echo "No old digests found for $IMAGE"
                 continue
               fi
       
-              # Delete the digest
-              echo "Deleting $digest for $IMAGE..."
-              gcloud artifacts docker images delete $FULL_IMAGE_PATH@$digest --quiet || true
+              TAGS=$(gcloud artifacts docker tags list "$FULL_IMAGE_PATH@$digest" --format="value(tag)" || echo "")
+      
+              if echo "$TAGS" | grep -qE 'latest|previous'; then
+                echo "Skipping digest $digest because it has protected tags"
+                continue
+              fi
+      
+              echo "Deleting digest $digest for $IMAGE"
+              gcloud artifacts docker images delete "$FULL_IMAGE_PATH@$digest" --quiet || true
             done
           done
 
