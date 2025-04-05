@@ -108,8 +108,3 @@ jobs:
               gcloud artifacts docker images delete $FULL_IMAGE_PATH@$digest --quiet || true
             done
           done
-      
-              echo "Deleting digest $digest for $IMAGE..."
-              gcloud artifacts docker images delete $FULL_IMAGE_PATH@$digest --quiet || true
-            done
-          done
