@@ -49,6 +49,30 @@ jobs:
           docker build -t $IMAGE_BASE/${{ secrets.IGNITED_CHAT_STAGING }} . \
             --build-arg CMD="npm start"
 
+      - name: Cleanup old images in Artifact Registry
+        run: |
+          IMAGES=("${{ secrets.IGNITEDAPI }}" "${{ secrets.IGNITEDAPI_WORKERS }}" "${{ secrets.IGNITEDAPI_SCHEDULER }}" "${{ secrets.IGNITED_CHAT_STAGING }}")
+          for IMAGE in "${IMAGES[@]}"; do
+            echo "Cleaning up old tags and untagged images for $IMAGE..."
+            TAGS=$(gcloud artifacts docker tags list $IMAGE_BASE/$IMAGE --format="value(tag)" --sort-by="~createTime")
+            KEEP_TAGS=("latest" "previous")
+            
+            # Delete all tags except for 'latest' and 'previous'
+            for TAG in $TAGS; do
+              if [[ ! " ${KEEP_TAGS[*]} " == *" $TAG "* ]]; then
+                echo "Deleting tag $TAG for $IMAGE"
+                gcloud artifacts docker tags delete $IMAGE_BASE/$IMAGE:$TAG --quiet
+              fi
+            done
+
+            # List and delete untagged images
+            UNTAGGED_IMAGES=$(gcloud artifacts docker images list $IMAGE_BASE/$IMAGE --filter="NOT tags:*" --format="value(digest)")
+            for DIGEST in $UNTAGGED_IMAGES; do
+              echo "Deleting untagged image with digest $DIGEST for $IMAGE"
+              gcloud artifacts docker images delete $IMAGE_BASE/$IMAGE@$DIGEST --quiet --delete-tags
+            done
+          done
+
       - name: Pull and retag previous latest as 'previous'
         continue-on-error: true
         run: |
@@ -77,45 +101,3 @@ jobs:
       - name: Debug image path setup
         run: |
           echo "IMAGE_BASE=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
-      
-      - name: Cleanup old images and tags in Artifact Registry
-        run: |
-          IMAGES=("${{ secrets.IGNITEDAPI }}" "${{ secrets.IGNITEDAPI_WORKERS }}" "${{ secrets.IGNITEDAPI_SCHEDULER }}" "${{ secrets.IGNITED_CHAT_STAGING }}")
-          for IMAGE in "${IMAGES[@]}"; do
-            echo "Cleaning up old tags and untagged images for $IMAGE..."
-            TAGS=$(gcloud artifacts docker tags list $IMAGE_BASE/$IMAGE --format="value(tag)" --sort-by="~createTime")
-            KEEP_TAGS=("latest" "previous")
-            COUNT=0
-            
-            # Debug the TAGS output
-            echo "All tags for $IMAGE: $TAGS"
-            
-            # Save third most recent (after latest & previous)
-            for TAG in $TAGS; do
-              if [[ " ${KEEP_TAGS[*]} " == *" $TAG "* ]]; then
-                continue
-              fi
-              if [[ $COUNT -lt 1 ]]; then
-                KEEP_TAGS+=("$TAG")
-                ((COUNT++))
-              fi
-            done
-            
-            # Debug the KEEP_TAGS array
-            echo "Tags to keep for $IMAGE: ${KEEP_TAGS[*]}"
-            
-            # Delete tags not in KEEP_TAGS
-            for TAG in $TAGS; do
-              if [[ ! " ${KEEP_TAGS[*]} " == *" $TAG "* ]]; then
-                echo "Deleting tag $TAG for $IMAGE"
-                gcloud artifacts docker tags delete $IMAGE_BASE/$IMAGE:$TAG --quiet
-              fi
-            done
-            
-            # List and delete untagged images
-            UNTAGGED_IMAGES=$(gcloud artifacts docker images list $IMAGE_BASE/$IMAGE --filter="tags:('*')" --format="value(digest)")
-            for DIGEST in $UNTAGGED_IMAGES; do
-              echo "Deleting untagged image with digest $DIGEST for $IMAGE"
-              gcloud artifacts docker images delete $IMAGE_BASE/$IMAGE@$DIGEST --quiet --delete-tags
-            done
-          done
