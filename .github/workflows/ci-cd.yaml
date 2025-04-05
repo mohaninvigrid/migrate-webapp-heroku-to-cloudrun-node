@@ -1,4 +1,4 @@
-name: Build & Push to Artifact Registry (Development)
+ame: Build & Push to Artifact Registry (Development)
 
 on:
   push:
@@ -42,6 +42,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
+      - name: Tag old :latest images as :previous (before build)
+        continue-on-error: true
+        run: |
+          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            echo "Tagging $IMAGE:latest as :previous..."
+            docker pull $IMAGE_BASE/$IMAGE:latest || echo "No latest image for $IMAGE"
+            if docker image inspect $IMAGE_BASE/$IMAGE:latest > /dev/null 2>&1; then
+              docker tag $IMAGE_BASE/$IMAGE:latest $IMAGE_BASE/$IMAGE:previous
+              docker push $IMAGE_BASE/$IMAGE:previous
+            fi
+          done
+
       - name: Build and tag web (IgnitedAPI) and workers (IgnitedAPI_Workers)
         run: |
           docker build -t $IMAGE_BASE/${{ secrets.IGNITEDAPI }} . --build-arg CMD="npm start"
@@ -59,14 +71,6 @@ jobs:
 
       - name: Confirm all built images
         run: docker images
-
-      - name: Tag current images as previous
-        run: |
-          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            docker pull $IMAGE_BASE/$IMAGE:latest || continue
-            docker tag $IMAGE_BASE/$IMAGE:latest $IMAGE_BASE/$IMAGE:previous
-            docker push $IMAGE_BASE/$IMAGE:previous
-          done
 
       - name: Tag and push all images to Artifact Registry
         run: |
