@@ -36,45 +36,59 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Build images using docker-compose (IGNITEDAPI, WORKERS)
+      - name: Build docker-compose images (web, workers)
         run: docker-compose build web workers
 
-      - name: Build Scheduler and Chat images (custom builds)
+      - name: Build IgnitedAPI_Scheduler
         run: |
-          docker build -t $IMAGE_BASE/${{ secrets.IGNITEDAPI_SCHEDULER }} . --build-arg CMD="node workers/scheduled/poc-warning.js"
-          docker build -t $IMAGE_BASE/${{ secrets.IGNITED_CHAT_STAGING }} . --build-arg CMD="npm start"
+          docker build -t $IMAGE_BASE/${{ secrets.IGNITEDAPI_SCHEDULER }} . \
+            --build-arg CMD="node workers/scheduled/poc-warning.js"
 
-      - name: Retag existing 'latest' as 'previous' if exists
+      - name: Build Ignited_Chat_Staging
+        run: |
+          docker build -t $IMAGE_BASE/${{ secrets.IGNITED_CHAT_STAGING }} . \
+            --build-arg CMD="npm start"
+
+      - name: Pull and retag previous latest as 'previous'
         continue-on-error: true
         run: |
           for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            docker pull $IMAGE_BASE/$IMAGE:latest && docker tag $IMAGE_BASE/$IMAGE:latest $IMAGE_BASE/$IMAGE:previous && docker push $IMAGE_BASE/$IMAGE:previous || echo "No previous image for $IMAGE"
+            if docker pull $IMAGE_BASE/$IMAGE:latest; then
+              docker tag $IMAGE_BASE/$IMAGE:latest $IMAGE_BASE/$IMAGE:previous
+              docker push $IMAGE_BASE/$IMAGE:previous
+            else
+              echo "No previous image found for $IMAGE, skipping tagging as previous"
+            fi
           done
 
-      - name: Tag new builds as 'latest' and push
+      - name: Tag and push all new images as 'latest'
         run: |
-          docker tag $IMAGE_BASE/${{ secrets.IGNITEDAPI }} $IMAGE_BASE/${{ secrets.IGNITEDAPI }}:latest
-          docker tag $IMAGE_BASE/${{ secrets.IGNITEDAPI_WORKERS }} $IMAGE_BASE/${{ secrets.IGNITEDAPI_WORKERS }}:latest
-          docker tag $IMAGE_BASE/${{ secrets.IGNITEDAPI_SCHEDULER }} $IMAGE_BASE/${{ secrets.IGNITEDAPI_SCHEDULER }}:latest
-          docker tag $IMAGE_BASE/${{ secrets.IGNITED_CHAT_STAGING }} $IMAGE_BASE/${{ secrets.IGNITED_CHAT_STAGING }}:latest
+          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            echo "Tagging $IMAGE as latest..."
+            docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:latest
+            docker push $IMAGE_BASE/$IMAGE:latest
+          done
 
-          docker push $IMAGE_BASE/${{ secrets.IGNITEDAPI }}:latest
-          docker push $IMAGE_BASE/${{ secrets.IGNITEDAPI_WORKERS }}:latest
-          docker push $IMAGE_BASE/${{ secrets.IGNITEDAPI_SCHEDULER }}:latest
-          docker push $IMAGE_BASE/${{ secrets.IGNITED_CHAT_STAGING }}:latest
-
-      - name: Cleanup old untagged digests (keep only latest & previous)
+      - name: Cleanup old image digests (keep latest 3, skip latest/previous)
         continue-on-error: true
         run: |
           for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
-            echo "Cleaning up $IMAGE..."
-            FULL_IMAGE_PATH="$IMAGE_BASE/$IMAGE"
-            gcloud artifacts docker images list $FULL_IMAGE_PATH               --include-tags --sort-by="~createTime" --format="value(digest)" | tail -n +4 | while read digest; do
-              TAGS=$(gcloud artifacts docker tags list $FULL_IMAGE_PATH@$digest --format="value(tag)" || echo "")
+            echo "Cleaning up old digests for $IMAGE..."
+            FULL_IMAGE_PATH=$IMAGE_BASE/$IMAGE
+
+            gcloud artifacts docker images list $FULL_IMAGE_PATH \
+              --include-tags \
+              --sort-by="~createTime" \
+              --format="value(digest)" | tail -n +4 | while read digest; do
+              
+              TAGS=$(gcloud artifacts docker tags list $FULL_IMAGE_PATH@$digest \
+                --format="value(tag)" || echo "")
+
               if echo "$TAGS" | grep -qE "latest|previous"; then
-                echo "Skipping digest $digest (tagged as latest/previous)"
+                echo "Skipping digest $digest (has protected tag)"
                 continue
               fi
+
               echo "Deleting digest $digest for $IMAGE..."
               gcloud artifacts docker images delete $FULL_IMAGE_PATH@$digest --quiet || true
             done
