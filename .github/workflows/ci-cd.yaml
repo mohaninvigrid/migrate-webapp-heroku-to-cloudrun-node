@@ -64,8 +64,13 @@ jobs:
       - name: Tag and push all new images as 'latest'
         run: |
           for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            echo "Building $IMAGE before tagging..."
+            docker build -t $IMAGE_BASE/$IMAGE . --build-arg CMD="npm start" || echo "Build skipped if already done"
+            
             echo "Tagging $IMAGE as latest..."
             docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:latest
+            
+            echo "Pushing $IMAGE:latest..."
             docker push $IMAGE_BASE/$IMAGE:latest
           done
 
