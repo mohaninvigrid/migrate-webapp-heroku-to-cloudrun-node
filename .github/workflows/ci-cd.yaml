@@ -78,11 +78,11 @@ jobs:
         run: |
           echo "IMAGE_BASE=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
       
-      - name: Cleanup old image tags in Artifact Registry
+      - name: Cleanup old images and tags in Artifact Registry
         run: |
           IMAGES=("${{ secrets.IGNITEDAPI }}" "${{ secrets.IGNITEDAPI_WORKERS }}" "${{ secrets.IGNITEDAPI_SCHEDULER }}" "${{ secrets.IGNITED_CHAT_STAGING }}")
           for IMAGE in "${IMAGES[@]}"; do
-            echo "Cleaning up old tags for $IMAGE..."
+            echo "Cleaning up old tags and untagged images for $IMAGE..."
             TAGS=$(gcloud artifacts docker tags list $IMAGE_BASE/$IMAGE --format="value(tag)" --sort-by="~createTime")
             KEEP_TAGS=("latest" "previous")
             COUNT=0
@@ -110,5 +110,12 @@ jobs:
                 echo "Deleting tag $TAG for $IMAGE"
                 gcloud artifacts docker tags delete $IMAGE_BASE/$IMAGE:$TAG --quiet
               fi
+            done
+            
+            # List and delete untagged images
+            UNTAGGED_IMAGES=$(gcloud artifacts docker images list $IMAGE_BASE/$IMAGE --filter="tags:('*')" --format="value(digest)")
+            for DIGEST in $UNTAGGED_IMAGES; do
+              echo "Deleting untagged image with digest $DIGEST for $IMAGE"
+              gcloud artifacts docker images delete $IMAGE_BASE/$IMAGE@$DIGEST --quiet --delete-tags
             done
           done
