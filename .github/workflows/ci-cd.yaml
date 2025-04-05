@@ -42,9 +42,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Build images using docker-compose
+      - name: Build web and workers using docker-compose
         run: |
-          docker-compose build web workers ignitedapi_scheduler
+          docker-compose build web workers
+
+      - name: Build Scheduler
+        run: |
+          IMAGE=${{ secrets.IGNITEDAPI_SCHEDULER }}
+          docker build -t $IMAGE_BASE/$IMAGE . --build-arg CMD="node workers/scheduled/poc-warning.js"
+
+      - name: Build Chat Staging
+        run: |
+          IMAGE=${{ secrets.IGNITED_CHAT_STAGING }}
+          docker build -t $IMAGE_BASE/$IMAGE . --build-arg CMD="npm start"
 
       - name: Tag current images as previous
         run: |
@@ -54,51 +64,29 @@ jobs:
             docker push $IMAGE_BASE/$IMAGE:previous
           done
 
-      - name: Cleanup old images (web, workers, scheduler, chat)
+      - name: Tag and push all images to Artifact Registry
         run: |
-          set -e
-          IMAGE_NAMES=(
-            "${{ secrets.IGNITEDAPI }}"
-            "${{ secrets.IGNITEDAPI_WORKERS }}"
-            "${{ secrets.IGNITEDAPI_SCHEDULER }}"
-            "${{ secrets.IGNITED_CHAT_STAGING }}"
-          )
-
-          for IMAGE in "${IMAGE_NAMES[@]}"; do
-            echo "Deleting old images for $IMAGE..."
-            IMAGE_PATH=$IMAGE_BASE/$IMAGE
-            TAGS=$(gcloud artifacts docker tags list $IMAGE_PATH --format="value(name)")
-            for TAG in $TAGS; do
-              gcloud artifacts docker images delete "$TAG" --quiet --delete-tags
-            done
-          done
-
-      - name: Push web and workers images to Artifact Registry
-        run: |
-          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }}; do
+          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
             docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:$COMMIT_TAG
             docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:latest
             docker push $IMAGE_BASE/$IMAGE:$COMMIT_TAG
             docker push $IMAGE_BASE/$IMAGE:latest
           done
 
-      - name: Build and Push Scheduler (IgnitedAPI_Scheduler)
+      - name: Cleanup old digests (keep latest 3 per image)
+        continue-on-error: true
         run: |
-          IMAGE=${{ secrets.IGNITEDAPI_SCHEDULER }}
-          docker build -t $IMAGE_BASE/$IMAGE . --build-arg CMD="node workers/scheduled/poc-warning.js"
-          docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-          docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:latest
-          docker push $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-          docker push $IMAGE_BASE/$IMAGE:latest
-
-      - name: Build and Push Chat Staging (Ignited_Chat_Staging)
-        run: |
-          IMAGE=${{ secrets.IGNITED_CHAT_STAGING }}
-          docker build -t $IMAGE_BASE/$IMAGE . --build-arg CMD="npm start"
-          docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-          docker tag $IMAGE_BASE/$IMAGE $IMAGE_BASE/$IMAGE:latest
-          docker push $IMAGE_BASE/$IMAGE:$COMMIT_TAG
-          docker push $IMAGE_BASE/$IMAGE:latest
+          for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
+            echo "Cleaning up $IMAGE..."
+            gcloud artifacts docker images list ${{ secrets.PROJECT_ID }}/${{ secrets.REPO }} \
+              --filter="package=$IMAGE" \
+              --include-tags \
+              --sort-by="~createTime" \
+              --format="value(version)" | tail -n +4 | while read digest; do
+                echo "Deleting old digest $digest for $IMAGE"
+                gcloud artifacts docker images delete $IMAGE_BASE/$IMAGE@$digest --quiet || true
+              done
+          done
 
       - name: Check if Cloud Run service exists
         id: check-run
