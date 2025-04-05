@@ -78,8 +78,7 @@ jobs:
         run: |
           echo "IMAGE_BASE=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
       
-      - name: Cleanup old image digests (keep latest 3)
-        continue-on-error: true
+      - name: Clean up old image digests (keep latest 3)
         run: |
           IMAGE_NAMES=(
             "${{ secrets.IGNITEDAPI }}"
@@ -90,21 +89,22 @@ jobs:
       
           for IMAGE in "${IMAGE_NAMES[@]}"; do
             echo "Cleaning up old digests for $IMAGE..."
-            FULL_PATH="${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$IMAGE"
       
-            DIGESTS=$(gcloud artifacts docker images list $FULL_PATH \
+            DIGESTS=$(gcloud artifacts docker images list ${IMAGE_BASE}/${IMAGE} \
               --include-tags \
               --sort-by="~createTime" \
               --format="value(digest)")
       
-            echo "$DIGESTS" | grep -v '^$' | tail -n +4 | while read digest; do
-              if [ -z "$digest" ]; then
-                echo "Skipping: digest is empty"
+            COUNT=0
+            echo "$DIGESTS" | while read digest; do
+              COUNT=$((COUNT+1))
+              if [ $COUNT -le 3 ]; then
+                echo "Keeping digest $digest"
                 continue
               fi
       
-              echo "Checking tags for digest $digest..."
-              TAGS=$(gcloud artifacts docker tags list "$FULL_PATH@$digest" --format="value(tag)" || echo "")
+              TAGS=$(gcloud artifacts docker tags list ${IMAGE_BASE}/${IMAGE}@$digest \
+                --format="value(tag)" || echo "")
       
               if echo "$TAGS" | grep -qE "latest|previous"; then
                 echo "Skipping digest $digest (has protected tag)"
@@ -112,6 +112,6 @@ jobs:
               fi
       
               echo "Deleting digest $digest for $IMAGE..."
-              gcloud artifacts docker images delete "$FULL_PATH@$digest" --quiet || true
+              gcloud artifacts docker images delete ${IMAGE_BASE}/${IMAGE}@$digest --quiet || true
             done
           done
