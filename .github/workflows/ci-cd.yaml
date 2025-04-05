@@ -12,7 +12,7 @@ on:
         default: 'false'
 
 env:
-  IMAGE_BASE: us-central1-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}
+  IMAGE_BASE: ${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}
   COMMIT_TAG: ${{ github.sha }}
 
 jobs:
