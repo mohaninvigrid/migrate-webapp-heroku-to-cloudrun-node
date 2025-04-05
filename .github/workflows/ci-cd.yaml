@@ -97,17 +97,22 @@ jobs:
       
             COUNT=0
             echo "$DIGESTS" | while read digest; do
+              if [ -z "$digest" ]; then
+                continue
+              fi
+      
               COUNT=$((COUNT+1))
               if [ $COUNT -le 3 ]; then
                 echo "Keeping digest $digest"
                 continue
               fi
       
+              echo "Checking tags for digest $digest..."
               TAGS=$(gcloud artifacts docker tags list ${IMAGE_BASE}/${IMAGE}@$digest \
                 --format="value(tag)" || echo "")
       
               if echo "$TAGS" | grep -qE "latest|previous"; then
-                echo "Skipping digest $digest (has protected tag)"
+                echo "Skipping digest $digest (tagged latest or previous)"
                 continue
               fi
       
