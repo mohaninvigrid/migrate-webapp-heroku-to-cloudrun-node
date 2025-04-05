@@ -73,27 +73,32 @@ jobs:
             echo "Pushing $IMAGE:latest..."
             docker push $IMAGE_BASE/$IMAGE:latest
           done
-
-      - name: Cleanup old image digests (keep latest 3, skip latest/previous)
+          
+      - name: Debug image path setup
+        run: |
+          echo "IMAGE_BASE=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
+      
+      - name: Cleanup old digests (keep 3 recent)
         continue-on-error: true
         run: |
           for IMAGE in ${{ secrets.IGNITEDAPI }} ${{ secrets.IGNITEDAPI_WORKERS }} ${{ secrets.IGNITEDAPI_SCHEDULER }} ${{ secrets.IGNITED_CHAT_STAGING }}; do
             echo "Cleaning up old digests for $IMAGE..."
-            FULL_IMAGE_PATH=$IMAGE_BASE/$IMAGE
-
+      
+            FULL_IMAGE_PATH="${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$IMAGE"
+      
             gcloud artifacts docker images list $FULL_IMAGE_PATH \
               --include-tags \
               --sort-by="~createTime" \
               --format="value(digest)" | tail -n +4 | while read digest; do
               
-              TAGS=$(gcloud artifacts docker tags list $FULL_IMAGE_PATH@$digest \
-                --format="value(tag)" || echo "")
-
+              echo "Checking tags for digest $digest..."
+              TAGS=$(gcloud artifacts docker tags list $FULL_IMAGE_PATH@$digest --format="value(tag)" || echo "")
+      
               if echo "$TAGS" | grep -qE "latest|previous"; then
-                echo "Skipping digest $digest (has protected tag)"
+                echo "Skipping $digest (has protected tag)"
                 continue
               fi
-
+      
               echo "Deleting digest $digest for $IMAGE..."
               gcloud artifacts docker images delete $FULL_IMAGE_PATH@$digest --quiet || true
             done
