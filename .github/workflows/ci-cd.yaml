@@ -78,7 +78,7 @@ jobs:
         run: |
           echo "IMAGE_BASE=${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}"
       
-      - name: Cleanup old digests (keep latest 3)
+      - name: Cleanup old image digests (keep latest 3)
         continue-on-error: true
         run: |
           IMAGE_NAMES=(
@@ -90,16 +90,21 @@ jobs:
       
           for IMAGE in "${IMAGE_NAMES[@]}"; do
             echo "Cleaning up old digests for $IMAGE..."
-            FULL_IMAGE_PATH="${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$IMAGE"
+            FULL_PATH="${{ secrets.ARTIFACT_DOMAIN }}/${{ secrets.PROJECT_ID }}/${{ secrets.REPO }}/$IMAGE"
       
-            # List all digests sorted by createTime (newest first), skip top 3
-            gcloud artifacts docker images list $FULL_IMAGE_PATH \
+            DIGESTS=$(gcloud artifacts docker images list $FULL_PATH \
               --include-tags \
               --sort-by="~createTime" \
-              --format="value(digest)" | grep -v '^$' | tail -n +4 | while read digest; do
+              --format="value(digest)")
+      
+            echo "$DIGESTS" | grep -v '^$' | tail -n +4 | while read digest; do
+              if [ -z "$digest" ]; then
+                echo "Skipping: digest is empty"
+                continue
+              fi
       
               echo "Checking tags for digest $digest..."
-              TAGS=$(gcloud artifacts docker tags list "$FULL_IMAGE_PATH@$digest" --format="value(tag)" || echo "")
+              TAGS=$(gcloud artifacts docker tags list "$FULL_PATH@$digest" --format="value(tag)" || echo "")
       
               if echo "$TAGS" | grep -qE "latest|previous"; then
                 echo "Skipping digest $digest (has protected tag)"
@@ -107,6 +112,6 @@ jobs:
               fi
       
               echo "Deleting digest $digest for $IMAGE..."
-              gcloud artifacts docker images delete "$FULL_IMAGE_PATH@$digest" --quiet || true
+              gcloud artifacts docker images delete "$FULL_PATH@$digest" --quiet || true
             done
           done
