@@ -1,4 +1,4 @@
-ame: Build & Push to Artifact Registry (Development)
+name: Build & Push to Artifact Registry (Development)
 
 on:
   push:
